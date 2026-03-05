@@ -7,25 +7,36 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:wifi_signal_visualizer/app/constant/app_colors.dart';
 import 'package:wifi_signal_visualizer/app/data/local/heatmap_store.dart';
+import 'package:wifi_signal_visualizer/app/data/local/session_store.dart';
+import 'package:wifi_signal_visualizer/app/data/models/speed_test_result.dart';
+import 'package:wifi_signal_visualizer/app/services/speed_test_service.dart';
 import 'package:wifi_signal_visualizer/app/utils/signal_utils.dart';
 import '../../scanner/controllers/scanner_controller.dart';
 import '../../../data/models/path_point.dart';
 
 class HeatmapController extends GetxController {
-  HeatmapController({required ScannerController scanner}) : _sc = scanner;
+  HeatmapController({
+    required ScannerController scanner,
+    required SessionStore      sessions,
+  }) : _sc       = scanner,
+       _sessions = sessions;
 
   final ScannerController _sc;
+  final SessionStore      _sessions;
+  final _speedTest = SpeedTestService();
 
-  final isExporting     = false.obs;
-  final filterBand      = Rx<FrequencyBand?>(null);
-  // Observable version counter — increments every time a new blob is composited
-  final cacheVersionObs = 0.obs;
-  final repaintKey      = GlobalKey();
+  final isExporting       = false.obs;
+  final isSaving          = false.obs;
+  final isTestingSpeed    = false.obs;
+  final showPlacement     = false.obs;
+  final filterBand        = Rx<FrequencyBand?>(null);
+  final cacheVersionObs   = 0.obs;
+  final speedResults      = <SpeedTestResult>[].obs;
+  final repaintKey        = GlobalKey();
 
-  // Public accessor so the view never touches _sc directly
   HeatmapStore get store => _sc.heatmap;
 
-  List<PathPoint> get allPoints => _sc.heatmap.points;
+  List<PathPoint> get allPoints => store.points;
   int    get total     => allPoints.length;
   String get ssid      => allPoints.isEmpty ? '—' : allPoints.first.ssid;
   int    get bestRssi  => allPoints.isEmpty ? -100
@@ -38,13 +49,52 @@ class HeatmapController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    // Mirror the store's cacheVersion into our observable so Obx rebuilds work
-    ever(_sc.heatmap.cacheVersionObs, (int v) => cacheVersionObs.value = v);
-    cacheVersionObs.value = _sc.heatmap.cacheVersion;
+    ever(store.cacheVersionObs, (int v) => cacheVersionObs.value = v);
+    cacheVersionObs.value = store.cacheVersion;
   }
 
   void setFilter(FrequencyBand? b) => filterBand.value = b;
+  void togglePlacement()           => showPlacement.value = !showPlacement.value;
 
+  // ── Speed test ────────────────────────────────────────────────────────────
+  Future<void> runSpeedTest() async {
+    if (isTestingSpeed.value) return;
+    isTestingSpeed.value = true;
+    try {
+      // Use position of last heatmap point as location stamp
+      final lastPt = allPoints.isEmpty ? null : allPoints.last;
+      final result = await _speedTest.run(
+        posX: lastPt?.x ?? 0,
+        posY: lastPt?.y ?? 0,
+      );
+      speedResults.insert(0, result);
+    } catch (e) {
+      Get.snackbar('Speed test failed', e.toString(),
+          backgroundColor: AppColors.bgCard, colorText: Colors.white);
+    } finally {
+      isTestingSpeed.value = false;
+    }
+  }
+
+  // ── Save session ──────────────────────────────────────────────────────────
+  Future<void> saveSession() async {
+    if (isSaving.value || allPoints.isEmpty) return;
+    isSaving.value = true;
+    try {
+      await _sessions.save(ssid, List.from(allPoints));
+      Get.snackbar('Session saved', '$total points saved for $ssid',
+          backgroundColor: AppColors.bgCard.withOpacity(0.95),
+          colorText: AppColors.sigExcellent,
+          snackPosition: SnackPosition.BOTTOM);
+    } catch (e) {
+      Get.snackbar('Save failed', e.toString(),
+          backgroundColor: AppColors.bgCard, colorText: Colors.white);
+    } finally {
+      isSaving.value = false;
+    }
+  }
+
+  // ── Export image ──────────────────────────────────────────────────────────
   Future<void> exportImage() async {
     if (isExporting.value) return;
     isExporting.value = true;
@@ -73,7 +123,7 @@ class HeatmapController extends GetxController {
   }
 
   void clearAndBack() {
-    _sc.heatmap.clear();
+    store.clear();
     Get.back();
   }
 }

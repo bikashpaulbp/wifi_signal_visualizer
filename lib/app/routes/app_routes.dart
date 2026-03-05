@@ -7,6 +7,7 @@ abstract class Routes {
   static const SCANNER = _Paths.SCANNER;
   static const HEATMAP = _Paths.HEATMAP;
   static const APP_CAMERA = _Paths.APP_CAMERA;
+  static const SESSIONS = _Paths.SESSIONS;
 }
 
 abstract class _Paths {
@@ -15,4 +16,5 @@ abstract class _Paths {
   static const SCANNER = '/scanner';
   static const HEATMAP = '/heatmap';
   static const APP_CAMERA = '/app-camera';
+  static const SESSIONS = '/sessions';
 }

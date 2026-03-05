@@ -8,6 +8,8 @@ import '../modules/home/bindings/home_binding.dart';
 import '../modules/home/views/home_view.dart';
 import '../modules/scanner/bindings/scanner_binding.dart';
 import '../modules/scanner/views/scanner_view.dart';
+import '../modules/sessions/bindings/sessions_binding.dart';
+import '../modules/sessions/views/sessions_view.dart';
 
 part 'app_routes.dart';
 
@@ -36,6 +38,11 @@ class AppPages {
       name: _Paths.APP_CAMERA,
       page: () => const AppCameraView(),
       binding: AppCameraBinding(),
+    ),
+    GetPage(
+      name: _Paths.SESSIONS,
+      page: () => const SessionsView(),
+      binding: SessionsBinding(),
     ),
   ];
 }

@@ -4,19 +4,24 @@ import 'package:get/get.dart';
 import 'package:wifi_signal_visualizer/app/data/local/heatmap_store.dart';
 import 'package:wifi_signal_visualizer/app/data/models/path_point.dart';
 import 'package:wifi_signal_visualizer/app/data/models/wifi_network.dart';
+import 'package:wifi_signal_visualizer/app/services/rssi_history_service.dart';
 import 'package:wifi_signal_visualizer/app/services/sensor_service.dart';
 import 'package:wifi_signal_visualizer/app/services/wifi_service.dart';
 
 
+
 class ScannerController extends GetxController {
   ScannerController({
-    required WifiService   wifi,
-    required SensorService sensors,
+    required WifiService        wifi,
+    required SensorService      sensors,
+    required RssiHistoryService history,
   })  : _wifi    = wifi,
-        _sensors = sensors;
+        _sensors = sensors,
+        _history = history;
 
-  final WifiService   _wifi;
-  final SensorService _sensors;
+  final WifiService        _wifi;
+  final SensorService      _sensors;
+  final RssiHistoryService _history;
 
   // ── Public reactive state ─────────────────────────────────────────────────
   List<WifiNetwork> get networks   => _wifi.nearby;
@@ -26,9 +31,10 @@ class ScannerController extends GetxController {
   final routerBearing = 0.0.obs;
   final isRecording   = false.obs;
   final heatmap       = HeatmapStore();
-
-  // Screen positions for each network bubble (key → normalised 0-1)
   final bubblePositions = <String, ({double nx, double ny})>{}.obs;
+
+  // Expose history service to views
+  RssiHistoryService get historyService => _history;
 
   WifiNetwork? get selectedNetwork {
     final k = selectedKey.value;
@@ -38,10 +44,9 @@ class ScannerController extends GetxController {
   }
 
   WifiNetwork get connectedNetwork => _wifi.connectedNetwork;
-
-  double get azimuth    => _sensors.azimuth.value;
-  double get arrowAngle => (routerBearing.value - azimuth + 360) % 360;
-  int    get stepsSinceStart => _sensors.stepCount.value - _stepsAtStart;
+  double get azimuth          => _sensors.azimuth.value;
+  double get arrowAngle       => (routerBearing.value - azimuth + 360) % 360;
+  int    get stepsSinceStart  => _sensors.stepCount.value - _stepsAtStart;
 
   double _bestRssi     = -100.0;
   int    _stepsAtStart = 0;
@@ -55,8 +60,8 @@ class ScannerController extends GetxController {
     super.onInit();
     _wifi.startAll();
     _sensors.startListening();
+    _history.startTracking(_wifi.nearby);
 
-    // Auto-select connected network on first scan
     ever(_wifi.connectedBssid, (String bssid) {
       if (bssid.isNotEmpty && selectedKey.value.isEmpty) {
         selectedKey.value = bssid;
@@ -72,6 +77,7 @@ class ScannerController extends GetxController {
     _recTimer?.cancel();
     _wifi.stopAll();
     _sensors.stopListening();
+    _history.stopTracking();
     super.onClose();
   }
 
@@ -88,11 +94,9 @@ class ScannerController extends GetxController {
 
   void _startRec() {
     if (selectedNetwork == null) {
-      Get.snackbar(
-        'Select a network first',
-        'Tap a WiFi bubble or choose from the list.',
-        snackPosition: SnackPosition.BOTTOM,
-      );
+      Get.snackbar('Select a network first',
+          'Tap a WiFi bubble or choose from the Networks list.',
+          snackPosition: SnackPosition.BOTTOM);
       return;
     }
     _posX = _posY = 0;
@@ -126,6 +130,7 @@ class ScannerController extends GetxController {
 
   // ── Reactive handlers ─────────────────────────────────────────────────────
   void _onNetworks(List<WifiNetwork> nets) {
+    _history.startTracking(nets); // keep history service up to date
     _computePositions(nets);
     final sel = selectedNetwork;
     if (sel != null && sel.rssi > _bestRssi) {
@@ -149,20 +154,17 @@ class ScannerController extends GetxController {
   // ── Bubble layout ─────────────────────────────────────────────────────────
   void _computePositions(List<WifiNetwork> nets) {
     if (nets.isEmpty) { bubblePositions.clear(); return; }
-
     final sorted = [...nets]..sort((a, b) {
       if (a.key == selectedKey.value) return -1;
       if (b.key == selectedKey.value) return 1;
       return b.rssi.compareTo(a.rssi);
     });
-
     final count = sorted.length;
     final map   = <String, ({double nx, double ny})>{};
     for (int i = 0; i < count; i++) {
       final t  = count == 1 ? 0.5 : i / (count - 1);
-      final nx = 0.12 + t * 0.76;
-      // Stronger = lower on screen (closer to user)
-      final ny = 0.18 + (1.0 - sorted[i].ratio) * 0.50;
+      final nx = 0.10 + t * 0.80;
+      final ny = 0.16 + (1.0 - sorted[i].ratio) * 0.52;
       map[sorted[i].key] = (nx: nx, ny: ny);
     }
     bubblePositions.value = map;
