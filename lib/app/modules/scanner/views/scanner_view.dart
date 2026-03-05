@@ -5,16 +5,22 @@ import 'package:get/get.dart';
 import 'package:wifi_signal_visualizer/app/constant/app_colors.dart';
 import 'package:wifi_signal_visualizer/app/helper/painters/ar_overlay_painter.dart';
 import 'package:wifi_signal_visualizer/app/helper/painters/network_bubbles_painter.dart';
+import 'package:wifi_signal_visualizer/app/helper/painters/signal_waveform_painter.dart';
 import 'package:wifi_signal_visualizer/app/modules/app_camera/controllers/app_camera_controller.dart';
 import 'package:wifi_signal_visualizer/app/utils/signal_utils.dart';
 import 'package:wifi_signal_visualizer/app/widgets/channel_radar_sheet.dart';
 import 'package:wifi_signal_visualizer/app/widgets/compass_widget.dart';
+import 'package:wifi_signal_visualizer/app/widgets/health_score.dart';
 import 'package:wifi_signal_visualizer/app/widgets/network_list_sheet.dart';
+import 'package:wifi_signal_visualizer/app/widgets/network_timeline_sheet.dart';
 import 'package:wifi_signal_visualizer/app/widgets/rssi_sparkline_sheet.dart';
 import 'package:wifi_signal_visualizer/app/widgets/security_sheet.dart';
 import 'package:wifi_signal_visualizer/app/widgets/signal_hud.dart';
 import '../controllers/scanner_controller.dart';
 
+
+// ─── import fix: widgets are 4 levels deep ────────────────────────────────
+// lib/app/modules/scanner/views/widgets/*.dart → ../../../../ = lib/
 
 class ScannerView extends StatefulWidget {
   const ScannerView({super.key});
@@ -62,24 +68,20 @@ class _ScannerViewState extends State<ScannerView>
 
           // ── 2. Thermal overlay ──────────────────────────────────────────
           if (sel != null)
-            AnimatedBuilder(
-              animation: _anim,
+            AnimatedBuilder(animation: _anim,
               builder: (_, __) => CustomPaint(
                 painter: _ThermalPainter(
-                    ratio: sel.ratio, animValue: _anim.value)),
-            ),
+                    ratio: sel.ratio, animValue: _anim.value))),
 
-          // ── 3. AR atmosphere ────────────────────────────────────────────
-          AnimatedBuilder(
-            animation: _anim,
+          // ── 3. AR atmosphere (grid, rings, vignette) ────────────────────
+          AnimatedBuilder(animation: _anim,
             builder: (_, __) => CustomPaint(
               painter: ArOverlayPainter(
-                  network: sel, animValue: _anim.value, isRecording: isRec)),
-          ),
+                  network: sel, animValue: _anim.value,
+                  isRecording: isRec))),
 
-          // ── 4. SSID bubbles (tap = select, long-press = sparkline) ──────
-          AnimatedBuilder(
-            animation: _anim,
+          // ── 4. SSID bubbles — tap select, long-press sparkline ──────────
+          AnimatedBuilder(animation: _anim,
             builder: (_, __) {
               final painter = NetworkBubblesPainter(
                 networks:    networks,
@@ -90,14 +92,34 @@ class _ScannerViewState extends State<ScannerView>
               _lastPainter = painter;
               return GestureDetector(
                 behavior: HitTestBehavior.translucent,
-                onTapUp:      (d) => _onTapBubble(d.localPosition),
+                onTapUp:          (d) => _onTapBubble(d.localPosition),
                 onLongPressStart: (d) => _onLongPressBubble(d.localPosition),
                 child: CustomPaint(painter: painter),
               );
-            },
-          ),
+            }),
 
-          // ── 5. Top HUD ───────────────────────────────────────────────────
+          // ── 5. Oscilloscope waveform strip (bottom, above action bar) ───
+          if (sel != null)
+            Positioned(bottom: 102, left: 60, right: 60,
+              child: AnimatedBuilder(animation: _anim,
+                builder: (_, __) {
+                  final hist = _ctrl.historyService.history(sel.key);
+                  return SizedBox(height: 44,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: CustomPaint(
+                        painter: SignalWaveformPainter(
+                          history:      hist,
+                          liveRssi:     sel.rssi,
+                          frequencyMhz: sel.frequencyMhz,
+                          animValue:    _anim.value,
+                        ),
+                      ),
+                    ),
+                  );
+                })),
+
+          // ── 6. Top HUD ───────────────────────────────────────────────────
           Positioned(top: 0, left: 0, right: 0,
             child: SignalHud(
               network:     sel,
@@ -106,26 +128,28 @@ class _ScannerViewState extends State<ScannerView>
               stepCount:   _ctrl.stepsSinceStart,
             )),
 
-          // ── 6. Thermal legend ────────────────────────────────────────────
+          // ── 7. Thermal legend (right edge centre) ────────────────────────
           if (sel != null)
-            Positioned(right: 10, top: 0, bottom: 0,
+            Positioned(right: 8, top: 0, bottom: 0,
               child: Center(child: _ThermalLegend(ratio: sel.ratio))),
 
-          // ── 7. Compass ───────────────────────────────────────────────────
-          Positioned(bottom: 148, right: 72,
+          // ── 8. Health score gauge (top-left) ─────────────────────────────
+          Positioned(top: 56, left: 10,
+            child: const HealthScoreWidget()),
+
+          // ── 9. Compass ────────────────────────────────────────────────────
+          Positioned(bottom: 152, right: 12,
             child: Obx(() => CompassWidget(
               currentAzimuth: _ctrl.azimuth,
               routerBearing:  _ctrl.routerBearing.value,
               signalColor:    qColor,
             ))),
 
-          // ── 8. Quick-action toolbar (radar / security / sessions) ────────
-          Positioned(left: 10, top: 0, bottom: 0,
-            child: Center(child: _SideToolbar(
-              networks: networks,
-            ))),
+          // ── 10. Side toolbar (left edge centre) ──────────────────────────
+          Positioned(left: 8, top: 0, bottom: 100,
+            child: Center(child: _SideToolbar(ctrl: _ctrl))),
 
-          // ── 9. Bottom action bar ─────────────────────────────────────────
+          // ── 11. Bottom action bar ─────────────────────────────────────────
           Positioned(bottom: 0, left: 0, right: 0,
             child: _buildBottomBar(isRec, qColor)),
         ]);
@@ -146,22 +170,21 @@ class _ScannerViewState extends State<ScannerView>
     final p = _lastPainter;
     if (p == null) return;
     for (final e in p.hitRects.entries) {
-      if (e.value.contains(pos)) {
-        final net = _ctrl.networks.firstWhereOrNull((n) => n.key == e.key);
-        if (net == null) return;
-        final hist = _ctrl.historyService.history(e.key);
-        RssiSparklineSheet.show(context, net.displaySsid, hist, net.rssi);
-        return;
-      }
+      if (!e.value.contains(pos)) continue;
+      final net = _ctrl.networks.firstWhereOrNull((n) => n.key == e.key);
+      if (net == null) return;
+      final hist = _ctrl.historyService.history(e.key);
+      RssiSparklineSheet.show(context, net.displaySsid, hist, net.rssi);
+      return;
     }
   }
 
   // ── Bottom bar ────────────────────────────────────────────────────────────
   Widget _buildBottomBar(bool isRec, Color qColor) => Container(
-    padding: const EdgeInsets.fromLTRB(24, 12, 24, 34),
+    padding: const EdgeInsets.fromLTRB(24, 10, 24, 32),
     decoration: BoxDecoration(gradient: LinearGradient(
       begin: Alignment.bottomCenter, end: Alignment.topCenter,
-      colors: [Colors.black.withOpacity(0.80), Colors.transparent],
+      colors: [Colors.black.withOpacity(0.82), Colors.transparent],
     )),
     child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
       _ActionButton(icon: Icons.wifi_find_rounded, label: 'Networks',
@@ -184,10 +207,12 @@ class _ScannerViewState extends State<ScannerView>
   Widget _buildError(String msg) => Center(child: Padding(
     padding: const EdgeInsets.all(32),
     child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const Icon(Icons.no_photography_outlined, color: AppColors.danger, size: 44),
+      const Icon(Icons.no_photography_outlined,
+          color: AppColors.danger, size: 44),
       const SizedBox(height: 14),
       const Text('Camera unavailable', style: TextStyle(
-          color: AppColors.textPrimary, fontSize: 17, fontWeight: FontWeight.bold)),
+          color: AppColors.textPrimary, fontSize: 17,
+          fontWeight: FontWeight.bold)),
       const SizedBox(height: 8),
       Text(msg, style: const TextStyle(color: AppColors.textSecondary),
           textAlign: TextAlign.center),
@@ -195,52 +220,43 @@ class _ScannerViewState extends State<ScannerView>
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Side toolbar — radar, security scanner, sessions
+// Side toolbar
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _SideToolbar extends StatelessWidget {
-  const _SideToolbar({required this.networks});
-  final List networks;
+  const _SideToolbar({required this.ctrl});
+  final ScannerController ctrl;
 
   @override
-  Widget build(BuildContext context) {
-    final ctrl = Get.find<ScannerController>();
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.bgCard.withOpacity(0.75),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.bgCardBorder.withOpacity(0.7)),
-      ),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        _SideBtn(
-          icon: Icons.radar,
-          label: 'Radar',
-          onTap: () => ChannelRadarSheet.show(ctrl.networks.toList()),
-        ),
-        Divider(height: 1, color: AppColors.bgCardBorder.withOpacity(0.5)),
-        _SideBtn(
-          icon: Icons.security_rounded,
-          label: 'Security',
-          onTap: () => SecuritySheet.show(ctrl.networks.toList()),
-        ),
-        Divider(height: 1, color: AppColors.bgCardBorder.withOpacity(0.5)),
-        _SideBtn(
-          icon: Icons.history_rounded,
-          label: 'Sessions',
-          onTap: () => Get.toNamed('/sessions'),
-        ),
-      ]),
-    );
-  }
+  Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(
+      color: AppColors.bgCard.withOpacity(0.78),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: AppColors.bgCardBorder.withOpacity(0.7)),
+    ),
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      _Btn(Icons.radar,            'Radar',
+          () => ChannelRadarSheet.show(ctrl.networks.toList())),
+      _Divider(),
+      _Btn(Icons.security_rounded, 'Security',
+          () => SecuritySheet.show(ctrl.networks.toList())),
+      _Divider(),
+      _Btn(Icons.timeline_rounded, 'Timeline',
+          NetworkTimelineSheet.show),
+      _Divider(),
+      _Btn(Icons.history_rounded,  'Sessions',
+          () => Get.toNamed('/sessions')),
+    ]),
+  );
 }
 
-class _SideBtn extends StatelessWidget {
-  const _SideBtn({required this.icon, required this.label, required this.onTap});
+class _Btn extends StatelessWidget {
+  const _Btn(this.icon, this.label, this.onTap);
   final IconData icon; final String label; final VoidCallback onTap;
   @override Widget build(BuildContext ctx) => GestureDetector(
     onTap: onTap,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+    child: Padding(padding: const EdgeInsets.symmetric(
+        vertical: 10, horizontal: 9),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Icon(icon, color: AppColors.accent, size: 18),
         const SizedBox(height: 3),
@@ -249,8 +265,13 @@ class _SideBtn extends StatelessWidget {
       ])));
 }
 
+class _Divider extends StatelessWidget {
+  @override Widget build(BuildContext ctx) =>
+    Container(height: 1, color: AppColors.bgCardBorder.withOpacity(0.5));
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
-// Thermal camera overlay
+// Thermal overlay
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _ThermalPainter extends CustomPainter {
@@ -283,16 +304,19 @@ class _ThermalPainter extends CustomPainter {
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height),
       Paint()..shader = RadialGradient(
         center: Alignment.center, radius: 0.85,
-        colors: [hotCol.withOpacity(opacity),
-                 hotCol.withOpacity(opacity * 0.55),
-                 coolCol.withOpacity(opacity * 0.20),
-                 Colors.transparent],
+        colors: [
+          hotCol.withOpacity(opacity),
+          hotCol.withOpacity(opacity * 0.55),
+          coolCol.withOpacity(opacity * 0.20),
+          Colors.transparent,
+        ],
         stops: const [0.0, 0.35, 0.65, 1.0],
       ).createShader(Rect.fromLTWH(0, 0, size.width, size.height)));
+
     final center = Offset(size.width / 2, size.height / 2);
     for (int i = 0; i < 2; i++) {
-      final phase  = (animValue * 0.7 + i * 0.5) % 1.0;
-      final r      = size.shortestSide * 0.25 * (0.6 + phase * 0.4);
+      final phase = (animValue * 0.7 + i * 0.5) % 1.0;
+      final r     = size.shortestSide * 0.25 * (0.6 + phase * 0.4);
       canvas.drawCircle(center, r, Paint()
         ..color       = hotCol.withOpacity((1.0 - phase) * opacity * 0.5)
         ..style       = PaintingStyle.stroke
@@ -308,7 +332,7 @@ class _ThermalLegend extends StatelessWidget {
   const _ThermalLegend({required this.ratio});
   final double ratio;
   @override Widget build(BuildContext ctx) => Container(
-    width: 22, height: 140,
+    width: 18, height: 120,
     decoration: BoxDecoration(
       borderRadius: BorderRadius.circular(4),
       gradient: const LinearGradient(
@@ -319,28 +343,28 @@ class _ThermalLegend extends StatelessWidget {
       boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 4)],
     ),
     child: Stack(children: [
-      Positioned(top: (1.0 - ratio) * 116 + 4, left: -8,
-        child: CustomPaint(size: const Size(8, 10),
+      Positioned(top: (1.0 - ratio) * 100 + 4, left: -7,
+        child: CustomPaint(size: const Size(7, 9),
             painter: _ArrowPainter())),
     ]));
 }
 
 class _ArrowPainter extends CustomPainter {
   @override void paint(Canvas c, Size s) {
-    final path = Path()
+    c.drawPath(Path()
       ..moveTo(0, s.height / 2)
       ..lineTo(s.width, 0)
       ..lineTo(s.width, s.height)
-      ..close();
-    c.drawPath(path, Paint()..color = Colors.white);
+      ..close(), Paint()..color = Colors.white);
   }
   @override bool shouldRepaint(_) => false;
 }
 
-// ── Reusable buttons ──────────────────────────────────────────────────────────
+// ── Buttons ───────────────────────────────────────────────────────────────
 
 class _RecordButton extends StatelessWidget {
-  const _RecordButton({required this.isRecording, required this.color, required this.onTap});
+  const _RecordButton({required this.isRecording,
+      required this.color, required this.onTap});
   final bool isRecording; final Color color; final VoidCallback onTap;
   @override Widget build(BuildContext ctx) {
     final c = isRecording ? AppColors.recDot : color;
@@ -351,7 +375,8 @@ class _RecordButton extends StatelessWidget {
           color: c.withOpacity(0.16),
           border: Border.all(color: c, width: 2),
           boxShadow: [BoxShadow(color: c.withOpacity(0.45), blurRadius: 14)]),
-        child: Icon(isRecording ? Icons.stop_rounded : Icons.fiber_manual_record,
+        child: Icon(isRecording
+            ? Icons.stop_rounded : Icons.fiber_manual_record,
             color: c, size: 28)));
   }
 }

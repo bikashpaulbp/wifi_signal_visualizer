@@ -206,46 +206,75 @@ class HeatmapView extends StatelessWidget {
     final latest = ctrl.speedResults.isEmpty ? null : ctrl.speedResults.first;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       decoration: BoxDecoration(color: AppColors.bgCard,
           borderRadius: BorderRadius.circular(11),
           border: Border.all(color: AppColors.bgCardBorder)),
-      child: Row(children: [
-        const Icon(Icons.speed_rounded, color: AppColors.accent, size: 16),
-        const SizedBox(width: 8),
-        Expanded(child: latest == null
-          ? const Text('Run a speed test at this location',
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.speed_rounded, color: AppColors.accent, size: 14),
+          const SizedBox(width: 6),
+          const Expanded(child: Text('Speed Test',
               style: TextStyle(color: AppColors.textSecondary,
-                  fontSize: 11, fontFamily: 'monospace'))
-          : Row(children: [
-              _SpeedChip('Latency', latest.latencyLabel,
-                  _latencyColor(latest.latencyMs)),
-              const SizedBox(width: 10),
-              _SpeedChip('Download', latest.downloadLabel,
-                  AppColors.sigExcellent),
-            ])),
-        GestureDetector(
-          onTap: ctrl.isTestingSpeed.value ? null : ctrl.runSpeedTest,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: AppColors.accent.withOpacity(
-                  ctrl.isTestingSpeed.value ? 0.05 : 0.13),
-              borderRadius: BorderRadius.circular(7),
-              border: Border.all(color: AppColors.accent.withOpacity(0.5)),
-            ),
-            child: ctrl.isTestingSpeed.value
-              ? const SizedBox(width: 12, height: 12,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppColors.accent))
-              : const Text('Test', style: TextStyle(color: AppColors.accent,
-                    fontSize: 10, fontWeight: FontWeight.w700,
-                    fontFamily: 'monospace'))),
-        ),
+                  fontSize: 10, fontFamily: 'monospace',
+                  fontWeight: FontWeight.w600))),
+          if (latest != null)
+            _SpeedRatingBadge(latest.rating),
+          const SizedBox(width: 6),
+          GestureDetector(
+            onTap: ctrl.isTestingSpeed.value ? null : ctrl.runSpeedTest,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.accent.withOpacity(
+                    ctrl.isTestingSpeed.value ? 0.05 : 0.13),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: AppColors.accent.withOpacity(0.5)),
+              ),
+              child: ctrl.isTestingSpeed.value
+                ? const SizedBox(width: 11, height: 11,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.accent))
+                : const Text('Run', style: TextStyle(color: AppColors.accent,
+                      fontSize: 10, fontWeight: FontWeight.w700,
+                      fontFamily: 'monospace'))),
+          ),
+        ]),
+        if (latest != null) ...[
+          const SizedBox(height: 8),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+            _SpeedChip('↓ Download', latest.downloadLabel, AppColors.sigExcellent),
+            _SpeedDivider(),
+            _SpeedChip('↑ Upload',   latest.uploadLabel,   AppColors.band5),
+            _SpeedDivider(),
+            _SpeedChip('Latency',    latest.latencyLabel,  _latencyColor(latest.latencyMs)),
+            _SpeedDivider(),
+            _SpeedChip('Jitter',     latest.jitterLabel,   _jitterColor(latest.jitterMs)),
+          ]),
+          const SizedBox(height: 6),
+          // Use-case suitability row
+          Row(children: [
+            _SuitabilityTag('📹 Video', latest.goodForVideoCall),
+            const SizedBox(width: 5),
+            _SuitabilityTag('🎮 Gaming', latest.goodForGaming),
+            const SizedBox(width: 5),
+            _SuitabilityTag('4K Stream', latest.goodFor4kStreaming),
+          ]),
+        ] else
+          Padding(
+            padding: const EdgeInsets.only(top: 5),
+            child: Text('Tap Run to measure download, upload, latency & jitter',
+                style: TextStyle(color: AppColors.textMuted,
+                    fontSize: 9, fontFamily: 'monospace'))),
       ]),
     );
   });
+
+  Color _jitterColor(int ms) => ms < 10  ? AppColors.sigExcellent
+      : ms < 30  ? AppColors.sigGood
+      : ms < 60  ? AppColors.sigFair
+      : AppColors.sigPoor;
 
   Color _latencyColor(int ms) => ms < 50   ? AppColors.sigExcellent
       : ms < 100  ? AppColors.sigGood
@@ -313,11 +342,56 @@ class _SpeedChip extends StatelessWidget {
   final String label, value; final Color color;
   @override Widget build(BuildContext ctx) => Column(
     mainAxisSize: MainAxisSize.min,
-    crossAxisAlignment: CrossAxisAlignment.start,
+    crossAxisAlignment: CrossAxisAlignment.center,
     children: [
-      Text(value, style: TextStyle(color: color, fontSize: 12,
+      Text(value, style: TextStyle(color: color, fontSize: 11,
           fontWeight: FontWeight.w800, fontFamily: 'monospace')),
+      const SizedBox(height: 1),
       Text(label, style: const TextStyle(color: AppColors.textMuted,
-          fontSize: 8, letterSpacing: 0.5)),
+          fontSize: 8, letterSpacing: 0.4, fontFamily: 'monospace')),
     ]);
+}
+
+class _SpeedDivider extends StatelessWidget {
+  @override Widget build(BuildContext ctx) =>
+      Container(width: 1, height: 28, color: AppColors.bgCardBorder);
+}
+
+class _SpeedRatingBadge extends StatelessWidget {
+  const _SpeedRatingBadge(this.rating);
+  final String rating;
+  Color get _color => switch (rating) {
+    'Excellent' => AppColors.sigExcellent,
+    'Good'      => AppColors.sigGood,
+    'Fair'      => AppColors.sigFair,
+    _           => AppColors.sigPoor,
+  };
+  @override Widget build(BuildContext ctx) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+        color: _color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: _color.withOpacity(0.4))),
+    child: Text(rating, style: TextStyle(color: _color, fontSize: 8,
+        fontWeight: FontWeight.w700, fontFamily: 'monospace')));
+}
+
+class _SuitabilityTag extends StatelessWidget {
+  const _SuitabilityTag(this.label, this.ok);
+  final String label; final bool ok;
+  @override Widget build(BuildContext ctx) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+        color: (ok ? AppColors.sigExcellent : AppColors.sigUnusable)
+            .withOpacity(0.10),
+        borderRadius: BorderRadius.circular(4)),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(ok ? Icons.check_circle_outline : Icons.cancel_outlined,
+          size: 9,
+          color: ok ? AppColors.sigExcellent : AppColors.textMuted),
+      const SizedBox(width: 3),
+      Text(label, style: TextStyle(
+          color: ok ? AppColors.sigExcellent : AppColors.textMuted,
+          fontSize: 8, fontFamily: 'monospace')),
+    ]));
 }

@@ -4,37 +4,44 @@ import 'package:get/get.dart';
 import 'package:wifi_signal_visualizer/app/data/local/heatmap_store.dart';
 import 'package:wifi_signal_visualizer/app/data/models/path_point.dart';
 import 'package:wifi_signal_visualizer/app/data/models/wifi_network.dart';
+import 'package:wifi_signal_visualizer/app/services/network_timeline_service.dart';
 import 'package:wifi_signal_visualizer/app/services/rssi_history_service.dart';
 import 'package:wifi_signal_visualizer/app/services/sensor_service.dart';
+import 'package:wifi_signal_visualizer/app/services/wifi_health_service.dart';
 import 'package:wifi_signal_visualizer/app/services/wifi_service.dart';
-
-
 
 class ScannerController extends GetxController {
   ScannerController({
-    required WifiService        wifi,
-    required SensorService      sensors,
-    required RssiHistoryService history,
-  })  : _wifi    = wifi,
-        _sensors = sensors,
-        _history = history;
+    required WifiService             wifi,
+    required SensorService           sensors,
+    required RssiHistoryService      history,
+    required WifiHealthService       health,
+    required NetworkTimelineService  timeline,
+  })  : _wifi     = wifi,
+        _sensors  = sensors,
+        _history  = history,
+        _health   = health,
+        _timeline = timeline;
 
-  final WifiService        _wifi;
-  final SensorService      _sensors;
-  final RssiHistoryService _history;
+  final WifiService             _wifi;
+  final SensorService           _sensors;
+  final RssiHistoryService      _history;
+  final WifiHealthService       _health;
+  final NetworkTimelineService  _timeline;
 
-  // ── Public reactive state ─────────────────────────────────────────────────
+  // ── Public state ──────────────────────────────────────────────────────────
   List<WifiNetwork> get networks   => _wifi.nearby;
   bool              get isScanning => _wifi.isScanning.value;
 
-  final selectedKey   = ''.obs;
-  final routerBearing = 0.0.obs;
-  final isRecording   = false.obs;
-  final heatmap       = HeatmapStore();
+  final selectedKey     = ''.obs;
+  final routerBearing   = 0.0.obs;
+  final isRecording     = false.obs;
+  final heatmap         = HeatmapStore();
   final bubblePositions = <String, ({double nx, double ny})>{}.obs;
 
-  // Expose history service to views
-  RssiHistoryService get historyService => _history;
+  RssiHistoryService      get historyService  => _history;
+  WifiHealthService       get healthService   => _health;
+  NetworkTimelineService  get timelineService => _timeline;
 
   WifiNetwork? get selectedNetwork {
     final k = selectedKey.value;
@@ -44,9 +51,9 @@ class ScannerController extends GetxController {
   }
 
   WifiNetwork get connectedNetwork => _wifi.connectedNetwork;
-  double get azimuth          => _sensors.azimuth.value;
-  double get arrowAngle       => (routerBearing.value - azimuth + 360) % 360;
-  int    get stepsSinceStart  => _sensors.stepCount.value - _stepsAtStart;
+  double get azimuth         => _sensors.azimuth.value;
+  double get arrowAngle      => (routerBearing.value - azimuth + 360) % 360;
+  int    get stepsSinceStart => _sensors.stepCount.value - _stepsAtStart;
 
   double _bestRssi     = -100.0;
   int    _stepsAtStart = 0;
@@ -60,11 +67,12 @@ class ScannerController extends GetxController {
     super.onInit();
     _wifi.startAll();
     _sensors.startListening();
-    _history.startTracking(_wifi.nearby);
 
     ever(_wifi.connectedBssid, (String bssid) {
       if (bssid.isNotEmpty && selectedKey.value.isEmpty) {
         selectedKey.value = bssid;
+        final conn = networks.firstWhereOrNull((n) => n.bssid == bssid);
+        if (conn != null) _timeline.logConnection(conn);
       }
     });
 
@@ -77,14 +85,14 @@ class ScannerController extends GetxController {
     _recTimer?.cancel();
     _wifi.stopAll();
     _sensors.stopListening();
-    _history.stopTracking();
+    _health.reset();
     super.onClose();
   }
 
-  // ── Network selection ─────────────────────────────────────────────────────
+  // ── Selection ─────────────────────────────────────────────────────────────
   void selectNetwork(String key) {
     selectedKey.value = key;
-    _bestRssi = -100.0;
+    _bestRssi         = -100.0;
     routerBearing.value = 0;
   }
 
@@ -130,11 +138,14 @@ class ScannerController extends GetxController {
 
   // ── Reactive handlers ─────────────────────────────────────────────────────
   void _onNetworks(List<WifiNetwork> nets) {
-    _history.startTracking(nets); // keep history service up to date
+    _history.startTracking(nets);
+    _timeline.update(nets, _wifi.connectedBssid.value);
+    _health.update(nets, nets.firstWhereOrNull((n) => n.isConnected));
     _computePositions(nets);
+
     final sel = selectedNetwork;
     if (sel != null && sel.rssi > _bestRssi) {
-      _bestRssi = sel.rssi.toDouble();
+      _bestRssi           = sel.rssi.toDouble();
       routerBearing.value = _sensors.azimuth.value;
     }
   }
@@ -145,8 +156,8 @@ class ScannerController extends GetxController {
     if (newSteps <= 0) return;
     final dist = newSteps * SensorService.stepLengthM;
     final rad  = _sensors.azimuth.value * pi / 180;
-    _posX += dist * sin(rad);
-    _posY += dist * cos(rad);
+    _posX    += dist * sin(rad);
+    _posY    += dist * cos(rad);
     _lastSteps = current;
     _sample();
   }
@@ -159,13 +170,13 @@ class ScannerController extends GetxController {
       if (b.key == selectedKey.value) return 1;
       return b.rssi.compareTo(a.rssi);
     });
-    final count = sorted.length;
-    final map   = <String, ({double nx, double ny})>{};
-    for (int i = 0; i < count; i++) {
-      final t  = count == 1 ? 0.5 : i / (count - 1);
-      final nx = 0.10 + t * 0.80;
-      final ny = 0.16 + (1.0 - sorted[i].ratio) * 0.52;
-      map[sorted[i].key] = (nx: nx, ny: ny);
+    final map = <String, ({double nx, double ny})>{};
+    for (int i = 0; i < sorted.length; i++) {
+      final t  = sorted.length == 1 ? 0.5 : i / (sorted.length - 1);
+      map[sorted[i].key] = (
+        nx: 0.10 + t * 0.80,
+        ny: 0.16 + (1.0 - sorted[i].ratio) * 0.52,
+      );
     }
     bubblePositions.value = map;
   }
